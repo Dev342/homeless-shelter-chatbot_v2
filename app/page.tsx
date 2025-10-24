@@ -1,85 +1,123 @@
 "use client";
-import { useState } from "react";
-import ReactMarkdown from "react-markdown";
+
+import { useEffect, useRef, useState } from "react";
+
+type Msg = { role: "user" | "assistant"; content: string };
 
 export default function Home() {
   const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<{ role: string; content: string }[]>([]);
+  const [messages, setMessages] = useState<Msg[]>([]);
   const [loading, setLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, loading]);
 
   async function sendMessage() {
-    if (!input) return;
-    setLoading(true);
-    setMessages((prev) => [...prev, { role: "user", content: input }]);
+    const text = input.trim();
+    if (!text || loading) return;
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ query: input }),
-    });
-
-    // If using streaming — collect the text
-    const reader = res.body?.getReader();
-    const decoder = new TextDecoder();
-    let fullText = "";
-
-    if (reader) {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        fullText += decoder.decode(value, { stream: true });
-        setMessages((prev) => {
-          const updated = [...prev];
-          if (updated[updated.length - 1]?.role === "assistant") {
-            updated[updated.length - 1].content = fullText;
-          } else {
-            updated.push({ role: "assistant", content: fullText });
-          }
-          return updated;
-        });
-      }
-    }
-
-    setLoading(false);
     setInput("");
+    setLoading(true);
+    setMessages((m) => [...m, { role: "user", content: text }, { role: "assistant", content: "" }]);
+
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ query: text }),
+      });
+
+      if (!res.ok || !res.body) {
+        const err = await res.text().catch(() => "");
+        throw new Error(err || `HTTP ${res.status}`);
+      }
+
+      // Read stream and append to the LAST assistant message.
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let done = false;
+
+      while (!done) {
+        const { value, done: d } = await reader.read();
+        done = d;
+        if (value) {
+          const chunk = decoder.decode(value);
+          setMessages((current) => {
+            const copy = current.slice();
+            const last = copy[copy.length - 1];
+            if (last?.role === "assistant") {
+              last.content += chunk;
+            }
+            return copy;
+          });
+        }
+      }
+    } catch (e: any) {
+      setMessages((m) => [
+        ...m,
+        { role: "assistant", content: `Sorry—something went wrong: ${e?.message || e}` },
+      ]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function onEnter(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendMessage();
+    }
   }
 
   return (
-    <main className="flex flex-col items-center p-6 max-w-2xl mx-auto">
-      <h1 className="text-2xl font-semibold mb-4">🏠 ShelterBot</h1>
+    <main className="min-h-screen w-full flex flex-col bg-white">
+      <header className="w-full border-b px-5 py-3">
+        <h1 className="text-xl font-semibold tracking-tight">ShelterBot</h1>
+      </header>
 
-      <div className="w-full bg-gray-100 rounded-xl p-4 min-h-[400px] overflow-y-auto whitespace-pre-wrap">
-        {messages.map((m, i) => (
-          <div
-            key={i}
-            className={`mt-3 ${
-              m.role === "user" ? "text-blue-700" : "text-gray-800"
-            }`}
-          >
-            <b>{m.role === "user" ? "You" : "Bot"}:</b>
-            <div className="mt-1 prose prose-sm max-w-none">
-              <ReactMarkdown>{m.content}</ReactMarkdown>
+      <section className="flex-1 w-full max-w-3xl mx-auto px-4 py-6">
+        <div className="h-[70vh] md:h-[74vh] overflow-y-auto rounded-2xl border bg-gray-50 p-4">
+          {messages.map((m, i) => (
+            <div
+              key={i}
+              className={`mb-3 flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+            >
+              <div
+                className={`max-w-[85%] rounded-2xl px-4 py-2 text-[15px] leading-relaxed ${
+                  m.role === "user"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-gray-900 border border-gray-200 shadow-sm"
+                }`}
+              >
+                {m.content}
+              </div>
             </div>
-          </div>
-        ))}
-        {loading && <div className="text-gray-500 mt-2">Thinking...</div>}
-      </div>
+          ))}
+          {loading && (
+            <div className="text-gray-500 text-sm italic mt-2">Thinking…</div>
+          )}
+          <div ref={chatEndRef} />
+        </div>
 
-      <div className="flex mt-4 w-full">
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          className="flex-1 border rounded-l-lg p-2"
-          placeholder="Ask about nearby shelters..."
-        />
-        <button
-          onClick={sendMessage}
-          disabled={loading}
-          className="bg-blue-600 text-white px-4 rounded-r-lg disabled:opacity-50"
-        >
-          Send
-        </button>
-      </div>
+        <div className="mt-4 flex gap-2">
+          <input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onEnter}
+            placeholder="Ask about nearby shelters…"
+            className="flex-1 border rounded-lg px-3 py-2 text-[15px] focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
+          <button
+            onClick={sendMessage}
+            disabled={loading}
+            className="px-4 py-2 rounded-lg bg-blue-600 text-white disabled:opacity-50"
+          >
+            Send
+          </button>
+        </div>
+      </section>
     </main>
   );
 }

@@ -16,24 +16,24 @@ const Input = z.object({
 });
 
 const SYSTEM = `
-You are a compassionate but concise assistant helping people find homeless shelters.
+You are a compassionate, concise assistant helping people find nearby homeless shelters.
 
-💛 Tone:
-- Be warm, calm, and reassuring.
-- Use short sentences (1–2 per line).
-- Always use markdown-style bullet points for clarity.
+Tone:
+- Warm, brief, supportive.
+- Use short sentences.
+- Respond in markdown bullet points.
 
-📋 Format:
-- Start with one short supportive sentence.
-- Then list shelters using this format:
-  - **Shelter Name** — [address withheld if DV]  
-    📞 phone | 🔗 website | 🏠 key services
+Format:
+- Begin with one empathetic sentence.
+- Then list shelters in this format:
+  - **Name** — [address withheld if DV]
+    phone | website | key services | distance (if available)
 
-🧠 Rules:
-- Only show shelters when the user asks for them.
-- If they ask about one shelter, focus on that one with more details (services, contact, hours, etc.).
-- Never reveal safe-house addresses.
-- Keep responses brief but kind.
+Rules:
+- Only list shelters if the user asks for them.
+- Focus on a specific shelter if one is mentioned.
+- Never reveal domestic-violence shelter addresses.
+- Keep it under 6 bullet points.
 `;
 
 // -------------------- API ENTRY --------------------
@@ -43,8 +43,9 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const { query, userLocation } = Input.parse(body);
-    console.log("🟢 Parsed request:", query, userLocation);
+    console.log("🟢 Parsed:", query, userLocation);
 
+    // Cache key
     const cacheKey = `resp:${hash(query)}:${userLocation?.lat ?? "x"}:${userLocation?.lon ?? "x"}`;
     const cached = await redisGet(cacheKey);
     if (cached) {
@@ -52,18 +53,32 @@ export async function POST(req: NextRequest) {
       return new Response(cached, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     }
 
-    // ------------------ Embedding + Search ------------------
+    // ------------------ SMALL TALK GUARD ------------------
+    const smallTalk = /^(hi|hello|hey|thanks|thank you|good\s*(morning|evening)|how are you)/i;
+    if (smallTalk.test(query)) {
+      const quickReply =
+        "Hi there — I can help you find nearby shelters or safe housing options. " +
+        "Try something like:\n" +
+        "- women’s shelter near me\n" +
+        "- family shelter 10001\n" +
+        "- tell me about Hope House";
+      return new Response(quickReply, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
+    }
+
+    // ------------------ Embedding ------------------
     console.log("🧠 Creating embedding...");
     const vec = await embedText(query);
 
+    // ------------------ Qdrant Search ------------------
     console.log("📡 Searching Qdrant...");
     const results = await qdrant.search(SHELTER_COLLECTION, {
       vector: vec,
-      limit: 8,
-      with_payload: true,
+      limit: 6,
+      with_payload: ["name", "address", "phone", "website", "services", "lat", "lon"],
+      score_threshold: 0.2,
     });
 
-    if (!results.length) console.log("⚠️ No shelters found in Qdrant.");
+    if (!results.length) console.log("⚠️ No shelters found.");
 
     const resc = results.map((r: any) => {
       const d = r.payload;
@@ -72,55 +87,55 @@ export async function POST(req: NextRequest) {
       return { ...d, distKm };
     });
 
+    // ------------------ Format Results ------------------
     const formatted = resc
       .map((s: any) => {
         const addr = redactAddressIfDV(s.services, s.address);
         const dist =
-          s.distKm && isFinite(s.distKm) ? ` (${miles(s.distKm).toFixed(1)} mi)` : "";
-        return `- **${s.name}** — ${addr}${dist}  
-  📞 ${s.phone || "N/A"} | 🔗 ${s.website || "N/A"} | 🏠 ${s.services || "N/A"}`;
+          s.distKm && isFinite(s.distKm) ? ` • ${miles(s.distKm).toFixed(1)} mi` : "";
+        const phone = s.phone ? ` • ${s.phone}` : "";
+        const site = s.website ? ` • ${s.website}` : "";
+        const tag = s.services ? ` • ${s.services.split(/[.;]/)[0]}` : "";
+        return `- **${s.name}** — ${addr}${dist}${phone}${site}${tag}`;
       })
       .join("\n");
 
     console.log("🧾 Retrieved shelters:\n", formatted);
 
-    // ------------------ Prompt Logic ------------------
+    // ------------------ Determine Intent ------------------
     const lowerQ = query.toLowerCase();
     const wantsShelters =
-      ["shelter", "help", "homeless", "housing", "bed", "safe", "place"].some((word) =>
-        lowerQ.includes(word)
+      ["shelter", "homeless", "housing", "help", "safe", "place", "find"].some((w) =>
+        lowerQ.includes(w)
       );
 
-    // Detect if user asked about a specific shelter
     let focusShelter = "";
     for (const r of resc) {
       const name = (r.name || "").toLowerCase();
-      if (query.toLowerCase().includes(name.split(" ")[0])) {
+      if (lowerQ.includes(name.split(" ")[0])) {
         focusShelter = r.name;
         break;
       }
     }
 
-    // Build system prompt dynamically
+    // ------------------ Build Prompt ------------------
     let systemPrompt = SYSTEM;
     if (wantsShelters && formatted) {
       if (focusShelter) {
-        // Focused view for one shelter
         const focused = resc.find((r) => r.name === focusShelter);
         if (focused) {
           systemPrompt += `
-This is the shelter the user is asking about:
+This is the shelter the user asked about:
 Name: ${focused.name}
 Address: ${redactAddressIfDV(focused.services, focused.address)}
 Phone: ${focused.phone || "N/A"}
 Website: ${focused.website || "N/A"}
 Services: ${focused.services || "N/A"}
 
-Provide a short, kind summary of what this shelter offers.`;
+Give a short, kind summary of what this shelter provides.`;
         }
       } else {
-        // General list view
-        systemPrompt += `\nResources:\n${formatted}`;
+        systemPrompt += `\nNearby shelters:\n${formatted}`;
       }
     }
 
@@ -129,13 +144,11 @@ Provide a short, kind summary of what this shelter offers.`;
     const client = await getChatClient();
     const model = getChatModelName();
 
-    if (process.env.GROQ_API_KEY && model.includes("llama")) {
-      console.log(`🚀 Using Groq backend with model: ${model}`);
-    } else if (process.env.OPENAI_API_KEY && model.includes("gpt")) {
-      console.log(`✨ Using OpenAI backend with model: ${model}`);
-    } else {
-      console.log(`🤔 Using fallback model: ${model}`);
-    }
+    if (process.env.GROQ_API_KEY && model.includes("llama"))
+      console.log(`🚀 Using Groq backend: ${model}`);
+    else if (process.env.OPENAI_API_KEY && model.includes("gpt"))
+      console.log(`✨ Using OpenAI backend: ${model}`);
+    else console.log(`🤔 Using fallback model: ${model}`);
 
     const completion = await client.chat.completions.create({
       model,
@@ -167,7 +180,7 @@ Provide a short, kind summary of what this shelter offers.`;
           console.error("Stream error:", err);
         } finally {
           controller.close();
-          await redisSet(cacheKey, full, 3600);
+          if (full) await redisSet(cacheKey, full, 3600);
           console.log("💾 Response cached.");
         }
       },
