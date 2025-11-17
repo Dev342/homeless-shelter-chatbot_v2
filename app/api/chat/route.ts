@@ -39,6 +39,7 @@ Rules:
 // -------------------- API ENTRY --------------------
 export async function POST(req: NextRequest) {
   console.log("🔹 Received POST /api/chat");
+  console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
 
   try {
     const body = await req.json();

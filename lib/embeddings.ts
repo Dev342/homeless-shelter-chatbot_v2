@@ -2,30 +2,35 @@
 import OpenAI from "openai";
 import { redisGet, redisSet } from "./cache";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY! });
 const model = process.env.EMBEDDINGS_MODEL || "text-embedding-3-small";
+
+let openai: OpenAI | null = null;
+
+function getClient() {
+  if (openai) return openai;
+  if (process.env.OPENAI_API_KEY) {
+    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    return openai;
+  }
+  throw new Error("Missing OPENAI_API_KEY");
+}
 
 export async function embedText(text: string): Promise<number[]> {
   const key = `embed:${model}:${hash(text)}`;
   const cached = await redisGet(key);
-if (cached) {
-  try {
-    return JSON.parse(cached);
-  } catch (err) {
-    console.warn("⚠️ Invalid cached embedding, ignoring:", cached);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (err) {
+      console.warn("⚠️ Invalid cached embedding, ignoring:", cached);
+    }
   }
-}
 
-  if (!process.env.OPENAI_API_KEY) {
-  console.error("❌ OPENAI_API_KEY missing inside embedText()");
-  throw new Error("Missing OpenAI API key");
-}
+  const client = getClient();
+  console.log("🚀 Creating embedding with model:", model);
+  const res = await client.embeddings.create({ model, input: text });
+  const vec = res.data[0].embedding;
 
-console.log("🚀 Creating embedding with model:", model);
-
-
-  const r = await openai.embeddings.create({ model, input: text });
-  const vec = r.data[0].embedding;
   await redisSet(key, JSON.stringify(vec), 86400);
   return vec;
 }
