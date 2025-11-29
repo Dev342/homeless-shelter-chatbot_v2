@@ -132,7 +132,7 @@ const SendIcon = ({ className = "w-5 h-5" }) => (
   </svg>
 );
 
-// --- Reusable Button ---
+// Quick action button
 const QuickActionButton = ({
   icon,
   text,
@@ -151,7 +151,7 @@ const QuickActionButton = ({
   </button>
 );
 
-// --- HOME ---
+// --- MAIN COMPONENT ---
 export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
@@ -168,8 +168,7 @@ export default function Home() {
     setMessages([
       {
         role: "assistant",
-        content:
-          "Hello, I'm here to help you find shelter and support services. How can I assist you today?",
+        content: "Hello, I'm here to help you find shelter and support services. How can I assist you today?",
       },
     ]);
   }, []);
@@ -178,7 +177,7 @@ export default function Home() {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  // GEOLOCATION HANDLER
+  // Request geolocation
   const useMyLocation = () => {
     if (!navigator.geolocation) {
       setLocError("Your device does not support location.");
@@ -242,13 +241,12 @@ export default function Home() {
           { role: "assistant", content: aiMessageContent },
         ]);
       }
-    } catch (error) {
-      console.error("Chat error:", error);
+    } catch {
       setMessages((prev) => [
         ...prev,
         {
           role: "assistant",
-          content: `**Sorry, something went wrong.** Please try again.`,
+          content: "**Sorry, something went wrong.** Please try again.",
         },
       ]);
     } finally {
@@ -260,69 +258,66 @@ export default function Home() {
     setMessages([
       {
         role: "assistant",
-        content:
-          "Hello, I'm here to help you find shelter and support services. How can I assist you today?",
+        content: "Hello, I'm here to help you find shelter and support services. How can I assist you today?",
       },
     ]);
   };
 
   const handleQuickAction = (action: string) => {
-    const map: Record<string, string> = {
+    const quickMessages: Record<string, string> = {
       "Find nearby shelters": "I need help finding a place to stay tonight",
       "Emergency contacts": "Can you provide emergency contact numbers?",
       "Food resources": "Where can I find food assistance?",
       "Support services": "What support services are available?",
     };
-    sendMessage(map[action]);
+    sendMessage(quickMessages[action]);
   };
 
   return (
     <div className="h-screen bg-white font-sans text-slate-800 flex flex-col p-4 sm:p-6 lg:p-8">
-      <main className="w-full max-w-3xl lg:max-w-5xl mx-auto flex flex-col flex-1">
-        
-        {/* HEADER */}
+      <main className="w-full max-w-3xl mx-auto flex flex-col flex-1">
+        {/* Header */}
         <header className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <div className="bg-sky-100 text-sky-600 p-2 rounded-full">
               <ShieldIcon className="w-7 h-7" />
             </div>
             <div>
-              <h1 className="text-xl lg:text-2xl font-bold">Shelter Support Chatbot</h1>
-              <p className="text-sm lg:text-base text-slate-500">
-                Here to help you find resources
-              </p>
+              <h1 className="text-xl font-bold">Shelter Support Chatbot</h1>
+              <p className="text-sm text-slate-500">Here to help you find resources</p>
             </div>
           </div>
+
           <button
             onClick={startNewChat}
-            className="px-4 py-2 bg-sky-600 text-white rounded-lg text-sm hover:bg-sky-700"
+            className="px-4 py-2 bg-sky-600 text-white rounded-lg hover:bg-sky-700 text-sm"
           >
             + New Chat
           </button>
         </header>
 
-        {/* WELCOME */}
+        {/* Welcome */}
         <div className="bg-sky-50 border border-sky-200 rounded-xl p-6 my-6">
-          <h2 className="font-semibold mb-2 lg:text-lg">Welcome. You're not alone.</h2>
-          <p className="text-sm lg:text-base text-slate-600">
-            This chatbot can help you find shelter information, emergency contacts, food
-            resources, and support services in your area.
+          <h2 className="font-semibold text-slate-900 mb-2">Welcome. You're not alone.</h2>
+          <p className="text-sm text-slate-600">
+            This chatbot can help you find shelter information, emergency contacts, food resources,
+            and support services in your area.
           </p>
         </div>
 
-        {/* MESSAGES */}
+        {/* Messages */}
         <section className="flex-1 overflow-y-auto space-y-6 p-4">
           {messages.map((msg, i) => (
             <div
               key={i}
-              className={`flex items-start space-x-4 max-w-2xl ${
+              className={`flex items-start space-x-4 ${
                 msg.role === "user"
                   ? "ml-auto flex-row-reverse space-x-reverse"
                   : ""
               }`}
             >
               <div
-                className={`flex-shrink-0 h-10 w-10 rounded-full flex items-center justify-center ${
+                className={`flex-shrink-0 h-10 w-10 flex items-center justify-center rounded-full ${
                   msg.role === "user" ? "bg-slate-100" : "bg-sky-100"
                 }`}
               >
@@ -332,6 +327,7 @@ export default function Home() {
                   <ShieldIcon className="w-5 h-5 text-sky-600" />
                 )}
               </div>
+
               <div
                 className={`p-4 rounded-xl ${
                   msg.role === "user"
@@ -340,7 +336,7 @@ export default function Home() {
                 }`}
               >
                 <div
-                  className={`text-sm lg:text-base ${
+                  className={`text-sm ${
                     msg.role === "user" ? "text-slate-700" : "text-sky-800"
                   }`}
                 >
@@ -358,11 +354,11 @@ export default function Home() {
 
           {loading && (
             <div className="flex items-start space-x-4 max-w-xl">
-              <div className="bg-sky-100 h-10 w-10 rounded-full flex items-center justify-center">
+              <div className="h-10 w-10 bg-sky-100 rounded-full flex items-center justify-center">
                 <ShieldIcon className="w-5 h-5 text-sky-600" />
               </div>
               <div className="bg-sky-100 p-4 rounded-xl rounded-tl-none">
-                <p className="text-sm lg:text-base text-sky-800">Typing...</p>
+                <p className="text-sm text-sky-800">Typing...</p>
               </div>
             </div>
           )}
@@ -370,32 +366,31 @@ export default function Home() {
           <div ref={chatEndRef} />
         </section>
 
-        {/* FOOTER */}
+        {/* Footer */}
         <footer className="space-y-6">
+          {/* Location button */}
+          <button
+            onClick={useMyLocation}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
+          >
+            {locLoading ? "Getting location…" : "Use my location"}
+          </button>
 
-          {/* LOCATION BUTTON */}
-          <div>
-            <button
-              onClick={useMyLocation}
-              className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm hover:bg-blue-700"
-            >
-              {locLoading ? "Getting location…" : "Use my location"}
-            </button>
+          {userLocation && (
+            <p className="text-xs text-slate-500">
+              Using your location: {userLocation.lat.toFixed(3)},{" "}
+              {userLocation.lon.toFixed(3)}
+            </p>
+          )}
 
-            {userLocation && (
-              <p className="text-xs text-slate-500 mt-1">
-                Using your location: {userLocation.lat.toFixed(3)},{" "}
-                {userLocation.lon.toFixed(3)}
-              </p>
-            )}
+          {locError && (
+            <p className="text-xs text-red-500">{locError}</p>
+          )}
 
-            {locError && (
-              <p className="text-xs text-red-500 mt-1">{locError}</p>
-            )}
-          </div>
-
+          {/* Quick Actions */}
           <section className="space-y-4">
             <h3 className="text-sm font-medium text-slate-600">Quick actions:</h3>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <QuickActionButton
                 icon={<SearchIcon />}
@@ -420,6 +415,7 @@ export default function Home() {
             </div>
           </section>
 
+          {/* Input */}
           <div className="relative">
             <input
               type="text"
