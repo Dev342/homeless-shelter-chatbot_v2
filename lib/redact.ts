@@ -1,16 +1,21 @@
-// lib/redact.ts
-export function isDVFromText(text: string) {
-  if (!text) return false;
-  
-  // Stricter match — look for DV/safe-house indicators at start or as a main focus
-  return /\b(domestic\s+violence|safe\s*house|abuse\s*shelter)\b/i.test(text)
-    && !/\b(homeless|family|men|youth|general|emergency)\b/i.test(text);
-}
+export function redactAddressIfDV(services: string = "", address: string = "") {
+  const lowered = services.toLowerCase();
 
-export function redactAddressIfDV(services?: string, address?: string) {
-  if (!address) return "N/A";
-  if (services && isDVFromText(services)) {
-    return "[Address withheld for safety]";
+  const dvKeywords = [
+    "domestic violence",
+    "women's shelter",
+    "women shelter",
+    "dv",
+    "abuse",
+    "sexual assault",
+    "family violence",
+    "trafficking",
+    "survivor",
+  ];
+
+  if (dvKeywords.some(k => lowered.includes(k))) {
+    return null; // hides address
   }
+
   return address;
 }
