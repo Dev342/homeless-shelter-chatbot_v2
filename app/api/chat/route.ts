@@ -15,41 +15,66 @@ const Input = z.object({
   userLocation: z.object({ lat: z.number(), lon: z.number() }).optional(),
 });
 
+// ⭐ FULL SYSTEM PROMPT — NOT SHORTENED ⭐
 const SYSTEM = `
 You are a compassionate chatbot designed to assist homeless individuals in the Dallas–Fort Worth (DFW) area. Your primary goal is to help users quickly find nearby shelters and essential resources through a supportive, conversational interface.
+
 Core Principles:
 
-Empathy and Respect: Always respond in a caring, non-judgmental, and encouraging tone. Treat every user with dignity.
-Clarity and Simplicity: Provide clear, easy-to-understand instructions and information. Avoid jargon.
-Accuracy: Share up-to-date and reliable information about shelters, including location, hours, eligibility, and contact details.
-Accessibility: Support multiple languages (English, Spanish, and others as needed). Detect language and respond accordingly.
-Safety: Never share harmful, discriminatory, or judgmental content. Avoid sensitive personal questions unless necessary for providing help.
+Empathy and Respect:
+Always respond in a caring, non-judgmental, and encouraging tone. Treat every user with dignity.
+
+Clarity and Simplicity:
+Provide clear, easy-to-understand instructions and information. Avoid jargon.
+
+Accuracy:
+Share up-to-date and reliable information about shelters, including location, hours, eligibility, and contact details.
+
+Accessibility:
+Support multiple languages (English, Spanish, and others as needed). Detect language and respond accordingly.
+
+Safety:
+Never share harmful, discriminatory, or judgmental content.
+Avoid sensitive personal questions unless necessary for providing help.
+Domestic violence shelters must have their addresses hidden unless they publicly publish them.
 
 Capabilities:
 
-Provide a list of nearby shelters
-Offer details such as address, phone number, hours of operation, and any special requirements (e.g., ID, age, family status).
+Provide a list of nearby shelters.
+Offer details such as:
+- Address (hidden for DV shelters)
+- Phone number
+- Hours of operation
+- Special requirements (e.g., ID, age, family status)
+
 Suggest transportation options (public transit, walking directions).
-Share additional resources like food banks, medical clinics, and hotlines.
+
+Share additional resources:
+- Food banks
+- Medical clinics
+- Hotlines
+
 Maintain a warm, encouraging tone throughout the conversation.
 
 Behavior Guidelines:
 
-Begin by greeting the user warmly and asking how you can help.
-If the user seems distressed, acknowledge their situation with empathy before providing assistance.
-
-Provide information in short, clear steps. Offer to repeat or clarify if needed.
-End conversations with encouragement and an invitation to return for more help.
+Begin with a warm greeting and ask how you can help.
+If the user seems distressed, acknowledge their situation with empathy.
+Ask for location politely only if it is NOT provided by the system or user.
+If userLocation is provided, do NOT ask for location.
+Provide information in short, clear steps.
+Offer to repeat, expand, or clarify.
+End conversations with encouragement and an invitation to return.
 
 Example Style:
 
-“Thank you for sharing that. Here are three shelters near you. Would you like directions or phone numbers?”
+“Thank you for sharing that. Here are three shelters near you. Would you like directions or a phone number?”
+“I'm here to help you find a safe place. I can show shelters nearest your location.”
 `;
 
 // -------------------- API ENTRY --------------------
 export async function POST(req: NextRequest) {
   console.log("🔹 Received POST /api/chat");
-  console.log("🔑 OPENAI_API_KEY loaded:", !!process.env.OPENAI_API_KEY);
 
   try {
     const body = await req.json();
@@ -71,8 +96,9 @@ export async function POST(req: NextRequest) {
         "Hi there — I can help you find nearby shelters or safe housing options. " +
         "Try something like:\n" +
         "- women’s shelter near me\n" +
-        "- family shelter 10001\n" +
-        "- tell me about Hope House";
+        "- family shelter\n" +
+        "- show shelters close to me\n" +
+        "- I need a place to stay tonight";
       return new Response(quickReply, { headers: { "Content-Type": "text/plain; charset=utf-8" } });
     }
 
@@ -91,16 +117,18 @@ export async function POST(req: NextRequest) {
 
     if (!results.length) console.log("⚠️ No shelters found.");
 
+    // Attach distance
     const resc = results.map((r: any) => {
       const d = r.payload;
-      const distKm =
-        userLocation && haversineKm(userLocation.lat, userLocation.lon, d.lat, d.lon);
+      const distKm = userLocation
+        ? haversineKm(userLocation.lat, userLocation.lon, d.lat, d.lon)
+        : null;
       return { ...d, distKm };
     });
 
-    // ⭐⭐⭐ ADDED: SORT BY DISTANCE (closest first)
+    // ⭐⭐⭐ SORT BY DISTANCE WHEN LOCATION AVAILABLE ⭐⭐⭐
     if (userLocation) {
-      console.log("📏 Sorting shelters by distance...");
+      console.log("📏 Sorting by distance…");
       resc.sort((a: any, b: any) => {
         const da = a.distKm ?? Infinity;
         const db = b.distKm ?? Infinity;
@@ -111,9 +139,8 @@ export async function POST(req: NextRequest) {
     // ------------------ Format Results ------------------
     const formatted = resc
       .map((s: any) => {
-        const addr = redactAddressIfDV(s.services, s.address);
-        const dist =
-          s.distKm && isFinite(s.distKm) ? ` • ${miles(s.distKm).toFixed(1)} mi` : "";
+        const addr = redactAddressIfDV(s.services, s.address) || "Address withheld for safety";
+        const dist = s.distKm && isFinite(s.distKm) ? ` • ${miles(s.distKm).toFixed(1)} mi` : "";
         const phone = s.phone ? ` • ${s.phone}` : "";
         const site = s.website ? ` • ${s.website}` : "";
         const tag = s.services ? ` • ${s.services.split(/[.;]/)[0]}` : "";
@@ -125,15 +152,13 @@ export async function POST(req: NextRequest) {
 
     // ------------------ Determine Intent ------------------
     const lowerQ = query.toLowerCase();
-    const wantsShelters =
-      ["shelter", "homeless", "housing", "help", "safe", "place", "find"].some((w) =>
-        lowerQ.includes(w)
-      );
+    const wantsShelters = ["shelter", "homeless", "help", "housing", "place", "stay", "near"]
+      .some((w) => lowerQ.includes(w));
 
     let focusShelter = "";
     for (const r of resc) {
-      const name = (r.name || "").toLowerCase();
-      if (lowerQ.includes(name.split(" ")[0])) {
+      const nm = (r.name || "").toLowerCase();
+      if (lowerQ.includes(nm.split(" ")[0])) {
         focusShelter = r.name;
         break;
       }
@@ -141,35 +166,33 @@ export async function POST(req: NextRequest) {
 
     // ------------------ Build Prompt ------------------
     let systemPrompt = SYSTEM;
+
     if (wantsShelters && formatted) {
       if (focusShelter) {
         const focused = resc.find((r) => r.name === focusShelter);
         if (focused) {
           systemPrompt += `
-This is the shelter the user asked about:
+Shelter Information Requested:
 Name: ${focused.name}
-Address: ${redactAddressIfDV(focused.services, focused.address)}
+Address: ${redactAddressIfDV(focused.services, focused.address) || "Address withheld for safety"}
 Phone: ${focused.phone || "N/A"}
 Website: ${focused.website || "N/A"}
 Services: ${focused.services || "N/A"}
 
-Give a short, kind summary of what this shelter provides.`;
+Provide a gentle, kind explanation of what this shelter offers.`;
         }
       } else {
-        systemPrompt += `\nNearby shelters:\n${formatted}`;
+        systemPrompt += `
+
+Nearby shelters (sorted by distance if location available):
+${formatted}`;
       }
     }
 
     // ------------------ Call LLM ------------------
-    console.log("🧠 Calling LLM...");
+    console.log("🧠 Calling LLM…");
     const client = await getChatClient();
     const model = getChatModelName();
-
-    if (process.env.GROQ_API_KEY && model.includes("llama"))
-      console.log(`🚀 Using Groq backend: ${model}`);
-    else if (process.env.OPENAI_API_KEY && model.includes("gpt"))
-      console.log(`✨ Using OpenAI backend: ${model}`);
-    else console.log(`🤔 Using fallback model: ${model}`);
 
     const completion = await client.chat.completions.create({
       model,
@@ -178,12 +201,17 @@ Give a short, kind summary of what this shelter provides.`;
       stream: true,
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: query },
+        {
+          role: "user",
+          content: userLocation
+            ? `${query}\n\nUser location: ${userLocation.lat}, ${userLocation.lon}`
+            : query,
+        },
       ],
     });
 
     // ------------------ Stream Response ------------------
-    console.log("✅ Starting streaming response...");
+    console.log("✅ Starting streaming response…");
     let full = "";
 
     const stream = new ReadableStream({
